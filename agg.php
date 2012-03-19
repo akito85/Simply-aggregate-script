@@ -1,7 +1,6 @@
 <?php
 
 /* check the previous process if exists then dont start next process */
-
 $check = shell_exec("ps ax | grep /opt/bin/agg.php");
 print $check;
 if(substr_count(trim($check),"/usr/bin/php /opt/bin/agg.php") > 1){
@@ -22,10 +21,8 @@ TO DO : validate aggregation time check,
 logically only current month active_data collection gets aggregated into current aggregate collection ( same suffix )
 */
 
-
-/* get the timestamp in a file */
-if(file_exists('/root/last_ts2.txt')){
-    $last_ts = file_get_contents('/root/last_ts2.txt');
+if(file_exists('/root/last_ts.txt')){
+    $last_ts = file_get_contents('/root/last_ts.txt');
     if($last_ts == 0 || $last_ts == ''){
         $last_ts = false;
     }
@@ -41,21 +38,11 @@ $aggcollection->ensureIndex(array('capture_date' => 1 ));
 
 /* if there's no timestamp then find active_collection */
 $cursor = $collection->find()->sort(array('capture_date'=>1))->limit(1);
-
-/* get the bottom timestamp */
 $t0 = iterator_to_array($cursor);
 
-// for testing purposes
-//print_r($t0);
-//print $col;
-//exit;
-
-
-/* go to last record of active data */
 $cursor->rewind();
 
 $cursor = $collection->find()->sort(array('capture_date'=>-1))->limit(1);
-
 $t1 = iterator_to_array($cursor); /* very last capture date */
 
 $cursor->rewind();
@@ -93,7 +80,7 @@ for($i = 0;$i < $steps;$i++){
     print 'tstart : '.$tstart;
     $tend = $tstart+300;
     print "\r\n";
-    print 'tend : '.$tend ."\n". '$1 : ' . $t1;
+    print 'tend : '.$tend . "\n". ' $1 :' . $t1;
     print "\r\n";
     print "======================================";
     print "\r\n";
@@ -103,11 +90,9 @@ for($i = 0;$i < $steps;$i++){
     $results = iterator_to_array($cursor);
     
     print_r(iterator_to_array($cursor));
- 
+    
     // data summary
     $data = array();
-    // app transport packet count
-    $app = array();
 
     $data['tot_elapsed'] = 0;
     $data['tot_thruput_tcp'] = 0;
@@ -128,6 +113,7 @@ for($i = 0;$i < $steps;$i++){
     $data['tot_http'] = 0;
     $data['tot_proxy'] = 0;
     $data['tot_ntp'] = 0;
+    $data['tot_snmp'] = 0;
     $data['tot_ssh'] = 0;
     $data['tot_dns'] = 0;
     $data['tot_ssl'] = 0;
@@ -140,23 +126,22 @@ for($i = 0;$i < $steps;$i++){
     $data['tot_smtps'] = 0;
     $data['tot_smtpsub'] = 0;
     $data['tot_ftp'] = 0;
-    $data['tot_snmp'] = 0;
     
     foreach($results as $r){
         //summarize packet data within time range
         $data["tot_elapsed"] += $r['elapsed_time'];
+        $data["tot_thruput_tcp"] += ($r['transport_protocol'] == 'TCP')?($r['src_truhput']+$r['dst_truhput']):0;
         $data["tot_thruput_udp"] += ($r['transport_protocol'] == 'UDP')?($r['src_truhput']+$r['dst_truhput']):0;
         $data["tot_truhput"] += ($r['src_truhput']+$r['dst_truhput']);
-        $data["tot_pkt_tcp"] += ($r['transport_protocol'] == 'TCP')?($r['src_pkt_sent']+$r['dst_pkt_sent']):0;
-        $data["tot_pkt_out"] += $r['src_pkt_sent'];
-        $data["tot_pkt_udp"] += ($r['transport_protocol'] == 'UDP')?($r['src_pkt_sent']+$r['dst_pkt_sent']):0;
-        $data["tot_rxmt_pkt"] += ($r['src_actl_rxmt_pkt']+$r['dst_actl_rxmt_pkt']);
-        $data["tot_pkt_in"] += $r['dst_pkt_sent'];
         $data["tot_pkt"] += $r['tot_pkt'];
+        $data["tot_pkt_tcp"] += ($r['transport_protocol'] == 'TCP')?($r['src_pkt_sent']+$r['dst_pkt_sent']):0;
+        $data["tot_pkt_udp"] += ($r['transport_protocol'] == 'UDP')?($r['src_pkt_sent']+$r['dst_pkt_sent']):0;
+        $data["tot_pkt_in"] += $r['dst_pkt_sent'];
+        $data["tot_pkt_out"] += $r['src_pkt_sent'];
         $data["tot_byte_in"] += $r['dst_actl_byte_sent'];
-        $data["tot_thruput_tcp"] += ($r['transport_protocol'] == 'TCP')?($r['src_truhput']+$r['dst_truhput']):0;
-        $data["tot_rxmt_byte"] += $r['src_actl_byte_sent'] ;
         $data["tot_byte_out"] += $r['src_actl_byte_sent'] ;
+        $data["tot_rxmt_pkt"] += ($r['src_actl_rxmt_pkt']+$r['dst_actl_rxmt_pkt']);
+        $data["tot_rxmt_byte"] += $r['src_actl_byte_sent'] ;
         $data["tot_avg_rtt"] += $r['src_avg_rtt'];
         $data["tot_tcp_con"] += ($r['transport_protocol'] == 'TCP')?1:0;
         $data["tot_udp_con"] += ($r['transport_protocol'] == 'UDP')?1:0;
@@ -179,31 +164,24 @@ for($i = 0;$i < $steps;$i++){
         $data["tot_smtpsub"] += ($r['apps_protocol'] == 'SMTP Submissions')?1:0;
         $data["tot_ftp"] += ($r['apps_protocol'] == 'FTP')?1:0;
 
-        //remove collection
         $collection->remove(array( '_id' => $r['_id']),true);
         
-        //summarize unique ip within time range
-        /*
-        if(!in_array($r['dst_ipaddr'],$dst_ip_array)){
-            $dst_ip_array[] = $r['dst_ipaddr'];
-            $dst_ip_count++;
-        }
-
-        if(!in_array($r['src_ipaddr'],$src_ip_array)){
-            $src_ip_array[] = $r['src_ipaddr'];
-            $src_ip_count++;
-        }
-        */
     }
 
     $data["timestamp"] = $tend;
 
-    $check_ts = $aggcollection->find(array('timestamp'=>$tend));
-    $check_ts = iterator_to_array($check_ts);
+    if($data["tot_avg_rtt"] > 0 && $data["tot_tcp_con"] > 0){
+        $data["tot_avg_rtt"] = $data["tot_avg_rtt"] / $data["tot_tcp_con"];
 
-    if(count($check_ts) < 1){
+    }
+
+    $check_ts = $aggcollection->find(array('timestamp'=>$tend))->count();
+
+    print_r($check_ts);
+
+    if($check_ts < 1){
         $aggcollection->insert($data);
-        print "duplicate data found, skip insert\r\n";
+        print "inserting \r\n";
     }
     
     print_r($data);
@@ -214,6 +192,6 @@ for($i = 0;$i < $steps;$i++){
 
 }
 
-file_put_contents('/root/last_ts2.txt',$tend);
+file_put_contents('/root/last_ts.txt',$tend);
 
 ?>
